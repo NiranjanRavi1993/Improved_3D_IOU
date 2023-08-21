@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=16
 #SBATCH --time=0-6:0:00
-#SBATCH --mem=64gb
+#SBATCH --mem=128gb
 #SBATCH --partition=gpu
 #SBATCH --gpus v100:1
 #SBATCH --job-name=Train

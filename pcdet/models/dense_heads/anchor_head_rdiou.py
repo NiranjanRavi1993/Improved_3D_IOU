@@ -9,7 +9,8 @@ from .target_assigner.axis_aligned_target_assigner_add_gt import AxisAlignedTarg
 import logging
 import pdb
 
-log_file = ('iiou_from_rdiou.txt')
+rdiou_log_file = ('/N/slate/ravin/Fall2024/Improved_3D_IOU/logfile/rdiou.txt')
+iiou_log_file = ('/N/slate/ravin/Fall2024/Improved_3D_IOU/logfile/iiou.txt')
 
 def create_logger_loss(log_file=None, rank=0, log_level=logging.INFO):
     logger = logging.getLogger(__name__)
@@ -27,7 +28,8 @@ def create_logger_loss(log_file=None, rank=0, log_level=logging.INFO):
     logger.propagate = False
     return logger
     
-logger_iou = create_logger_loss(log_file)
+logger_rdiou = create_logger_loss(rdiou_log_file)
+logger_iiou = create_logger_loss(iiou_log_file)
 
 class AnchorHeadRDIoU(AnchorHeadTemplate):
     def __init__(self, model_cfg, input_channels, num_class, class_names, grid_size, point_cloud_range,
@@ -220,14 +222,28 @@ class AnchorHeadRDIoU(AnchorHeadTemplate):
         
         eps=1e-7
         
+        distance_between_x_cord = (x1u - x2u) ** 2+ (y1_min - y2_min) ** 2 + eps
+        distance_between_y_cord = (y1u - y2u) ** 2+ (x1_min - x2_min) ** 2 + eps
+        
+        distance_between_x_cord = len_factor * distance_between_x_cord
+        distance_between_y_cord = wid_factor * distance_between_y_cord
+        
         distance_between_min_edges = (x1_min - x2_min) ** 2+ (y1_min - y2_min) ** 2 + (z1_min - z2_min) ** 2 + eps
         
         distance_between_max_edges = (x1_max - x2_max) ** 2+ (y1_max - y2_max) ** 2 + (z1_max - z2_max) ** 2 + eps
         
-        eucledian_part = distance_between_min_edges + distance_between_max_edges
-        iiou = eucledian_part/c_diag
+        eucledian_part = distance_between_x_cord + distance_between_y_cord + distance_between_min_edges + distance_between_max_edges
+        iiou = eucledian_part/inter_diag
+        
+        
+        
+        
+        #logger_iou.info("iiou")
+        #logger_iou.info(iiou)
+        #logger_iou.info("rdiou")
+        #logger_iou.info(rdiou)
           
-        return u, iiou
+        return u, rdiou, iiou #iiou
 
     def get_clsreg_targets(self):
         box_preds = self.forward_ret_dict['box_preds']
@@ -268,7 +284,7 @@ class AnchorHeadRDIoU(AnchorHeadTemplate):
                                    box_preds.shape[-1] // self.num_anchors_per_location if not self.use_multihead else
                                    box_preds.shape[-1])
 
-        _, rdiou =  self.get_rdiou(box_preds, box_reg_targets)
+        _, rdiou, iiou =  self.get_rdiou(box_preds, box_reg_targets)
 
         # filter the background.
         with torch.no_grad():
@@ -303,13 +319,25 @@ class AnchorHeadRDIoU(AnchorHeadTemplate):
                                    box_preds.shape[-1] // self.num_anchors_per_location if not self.use_multihead else
                                    box_preds.shape[-1])
 
-        u, rdiou = self.get_rdiou(box_preds, box_reg_targets)
+        u, rdiou, iiou = self.get_rdiou(box_preds, box_reg_targets)
 
         rdiou_loss_n = rdiou - u
         rdiou_loss_n = torch.clamp(rdiou_loss_n,min=-1.0,max = 1.0)
         rdiou_loss_m = 1 - rdiou_loss_n
         rdiou_loss_src = rdiou_loss_m * reg_weights
         rdiou_loss = rdiou_loss_src.sum() / batch_size
+        
+        #Niran 
+        iiou_loss_n = iiou - u
+        iiou_loss_n = torch.clamp(iiou_loss_n,min=-1.0,max = 1.0)
+        iiou_loss_m = 1 - iiou_loss_n
+        iiou_loss_src = iiou_loss_m * reg_weights
+        iiou_loss = iiou_loss_src.sum() / batch_size
+        
+        logger_rdiou.info(rdiou_loss)
+        logger_iiou.info(iiou_loss)
+        
+        
         rdiou_loss = rdiou_loss * self.model_cfg.LOSS_CONFIG.LOSS_WEIGHTS['loc_weight']
         box_loss = rdiou_loss
         tb_dict = {
