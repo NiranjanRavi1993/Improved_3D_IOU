@@ -9,9 +9,9 @@ from .target_assigner.axis_aligned_target_assigner_add_gt import AxisAlignedTarg
 import logging
 import pdb
 
-rdiou_log_file = ('/N/slate/ravin/Fall2024/Improved_3D_IOU/logfile/rdiou.txt')
-iiou_log_file = ('/N/slate/ravin/Fall2024/Improved_3D_IOU/logfile/iiou.txt')
-iou_log_file = ('/N/slate/ravin/Fall2024/Improved_3D_IOU/logfile/iou.txt')
+#rdiou_log_file = ('/N/slate/ravin/Fall2024/Improved_3D_IOU/logfile/rdiou.txt')
+#iiou_log_file = ('/N/slate/ravin/Fall2024/Improved_3D_IOU/logfile/iiou.txt')
+#iou_log_file = ('/N/slate/ravin/Fall2024/Improved_3D_IOU/logfile/iou.txt')
 cumulative_loss_log_file = ('/N/slate/ravin/Fall2024/Improved_3D_IOU/logfile/cumulative.txt')
 
 def create_logger_loss(log_file=None, rank=0, log_level=logging.INFO):
@@ -30,9 +30,9 @@ def create_logger_loss(log_file=None, rank=0, log_level=logging.INFO):
     logger.propagate = False
     return logger
     
-logger_rdiou = create_logger_loss(rdiou_log_file)
-logger_iiou = create_logger_loss(iiou_log_file)
-logger_iou = create_logger_loss(iou_log_file)
+#logger_rdiou = create_logger_loss(rdiou_log_file)
+#logger_iiou = create_logger_loss(iiou_log_file)
+#logger_iou = create_logger_loss(iou_log_file)
 cumulative_loss = create_logger_loss(cumulative_loss_log_file)
 
 class AnchorHeadRDIoU(AnchorHeadTemplate):
@@ -107,7 +107,6 @@ class AnchorHeadRDIoU(AnchorHeadTemplate):
         x2u, y2u, z2u = bboxes2[:,:,0], bboxes2[:,:,1], bboxes2[:,:,2]
         l2, w2, h2 =  torch.exp(bboxes2[:,:,3]), torch.exp(bboxes2[:,:,4]), torch.exp(bboxes2[:,:,5])
         t2 = torch.cos(bboxes1[:,:,6]) * torch.sin(bboxes2[:,:,6]) 
-        #logger_iou.info("iiou code is executing")
 
         # we emperically scale the y/z to make their predictions more sensitive.
         x1 = x1u
@@ -149,8 +148,8 @@ class AnchorHeadRDIoU(AnchorHeadTemplate):
         c_diag = torch.clamp((c_r - c_l),min=0)**2 + torch.clamp((c_b - c_t),min=0)**2 + torch.clamp((c_d - c_u),min=0)**2  + torch.clamp((c_n - c_m),min=0)**2
 
         union = volume_1 + volume_2 - inter_volume
-        u = (inter_diag) / c_diag
-        rdiou = inter_volume / union
+        d_square_part = (inter_diag) / c_diag
+        simple_intersection_over_union = inter_volume / union
         
         #Niranjan Code
         
@@ -158,36 +157,50 @@ class AnchorHeadRDIoU(AnchorHeadTemplate):
         wid_factor = w1/w2
         ht_factor  = h1/h2
         
-        x1_min = x1 - l1
-        x1_max = x1 + l1
-        y1_min = y1 - w1
-        y1_max = y1 + w1
-        z1_min = z1 - h1
-        z1_max = z1 + h1
+        x1_min = (x1 - l1)/2
+        x1_max = (x1 + l1)/2
+        y1_min = (y1 - w1)/2
+        y1_max = (y1 + w1)/2
+        z1_min = (z1 - h1)/2
+        z1_max = (z1 + h1)/2
+        t1_min = (t1 - j1)/2
+        t1_max = (t1 + j1)/2
         
-        x2_min = x2 - l2
-        x2_max = x2 + l2
-        y2_min = y2 - w2
-        y2_max = y2 + w2
-        z2_min = z2 - h2
-        z2_max = z2 + h2
+        x2_min = (x2 - l2)/2
+        x2_max = (x2 + l2)/2
+        y2_min = (y2 - w2)/2
+        y2_max = (y2 + w2)/2
+        z2_min = (z2 - h2)/2
+        z2_max = (z2 + h2)/2
+        t2_min = (t2 - j2)/2
+        t2_max = (t2 + j2)/2
         
         eps=1e-7
         
-        distance_between_x_cord = (x1u - x2u) ** 2+ (y1_min - y2_min) ** 2 + eps
-        distance_between_y_cord = (y1u - y2u) ** 2+ (x1_min - x2_min) ** 2 + eps
+        #distance_between_x_cord = (x1u - x2u) ** 2+ (y1_min - y2_min) ** 2 + eps
+        #distance_between_y_cord = (y1u - y2u) ** 2+ (x1_min - x2_min) ** 2 + eps
         
-        distance_between_x_cord = len_factor * distance_between_x_cord
-        distance_between_y_cord = wid_factor * distance_between_y_cord
+        #distance_between_x_cord = len_factor * distance_between_x_cord
+        #distance_between_y_cord = wid_factor * distance_between_y_cord
         
-        distance_between_min_edges = (x1_min - x2_min) ** 2+ (y1_min - y2_min) ** 2 + (z1_min - z2_min) ** 2 + eps
+        #distance_between_min_edges = (x1_min - x2_min) ** 2+ (y1_min - y2_min) ** 2 + (z1_min - z2_min) ** 2 + eps
         
-        distance_between_max_edges = (x1_max - x2_max) ** 2+ (y1_max - y2_max) ** 2 + (z1_max - z2_max) ** 2 + eps
+        #distance_between_max_edges = (x1_max - x2_max) ** 2+ (y1_max - y2_max) ** 2 + (z1_max - z2_max) ** 2 + eps
         
-        eucledian_part = distance_between_x_cord + distance_between_y_cord + distance_between_min_edges + distance_between_max_edges
-        iiou = eucledian_part/c_diag
+        #eucledian_part = distance_between_x_cord + distance_between_y_cord + distance_between_min_edges + distance_between_max_edges
+        #iiou = eucledian_part/c_diag
+        
+        eucledian_distance_for_x_centres = (x2 - x1)**2 + (y1_min - y2_min)**2 + (z1_min - z2_min)**2 + (t1_min - t2_min)**2
+        eculedian_distance_for_y_centres = (x1_min - x2_min)**2 + (y2 - y1)**2 + (z1_min - z2_min)**2 + (t1_min - t2_min)**2
+        eculedian_distance_for_z_centres = (x2 - x1)**2 + (y1_min - y2_min)**2 + (z2 - z1)**2 + (t1_min - t2_min)**2
+        
+        eucledian_distance_for_x_centres = eucledian_distance_for_x_centres / c_diag
+        eculedian_distance_for_y_centres = eculedian_distance_for_y_centres / c_diag
+        eculedian_distance_for_z_centres = eculedian_distance_for_z_centres / c_diag
+        
+        total_eculedian_distance = eucledian_distance_for_x_centres + eculedian_distance_for_y_centres + eculedian_distance_for_z_centres
           
-        return u, rdiou, iiou #iiou
+        return d_square_part, simple_intersection_over_union, total_eculedian_distance #iiou
 
     def get_clsreg_targets(self):
         box_preds = self.forward_ret_dict['box_preds']
@@ -266,10 +279,15 @@ class AnchorHeadRDIoU(AnchorHeadTemplate):
         u, rdiou, iiou = self.get_rdiou(box_preds, box_reg_targets)
 
         rdiou_loss_n = rdiou - u
+        #cumulative_loss.info("rdiou")
+        #cumulative_loss.info(rdiou_loss_n)
         rdiou_loss_n = torch.clamp(rdiou_loss_n,min=-1.0,max = 1.0)
+        #cumulative_loss.info(rdiou_loss_n)
         rdiou_loss_m = 1 - rdiou_loss_n
         rdiou_loss_src = rdiou_loss_m * reg_weights
         rdiou_loss = rdiou_loss_src.sum() / batch_size
+        #cumulative_loss.info(rdiou_loss)
+        #cumulative_loss.info("\n")
         
         
         rdiou_loss = rdiou_loss * self.model_cfg.LOSS_CONFIG.LOSS_WEIGHTS['loc_weight']
@@ -325,13 +343,16 @@ class AnchorHeadRDIoU(AnchorHeadTemplate):
                                    box_preds.shape[-1] // self.num_anchors_per_location if not self.use_multihead else
                                    box_preds.shape[-1])
 
-        u, rdiou, iiou = self.get_rdiou(box_preds, box_reg_targets)
+        d_square_part, simple_intersection_over_union, total_eculedian_distance = self.get_rdiou(box_preds, box_reg_targets)
 
        
         #Niran 
-        iiou_loss_n = iiou - u
-        iiou_loss_n = torch.clamp(iiou_loss_n,min=-1.0,max = 1.0)
-        iiou_loss_m = 1 - iiou_loss_n
+        #iiou_loss_n = iiou - rdiou
+        #iiou_loss_n = torch.clamp(iiou_loss_n,min=-1.0,max = 1.0)
+        
+        iiou_loss_n = simple_intersection_over_union - total_eculedian_distance
+        iiou_loss_n = 1- iiou_loss_n
+        iiou_loss_m = torch.clamp(iiou_loss_n,min=-1.0,max = 1.0)
         iiou_loss_src = iiou_loss_m * reg_weights
         iiou_loss = iiou_loss_src.sum() / batch_size
         
@@ -466,9 +487,11 @@ class AnchorHeadRDIoU(AnchorHeadTemplate):
         cls_loss, tb_dict_cls = self.get_rdiou_guided_cls_loss()
         tb_dict.update(tb_dict_cls)
         
-        cumulative_loss.info("rdiou " + str(box_loss))
+        #cumulative_loss.info("rdiou " + str(box_loss))
+        #cumulative_loss.info("iiou " + str(box_loss_iiou))
+        #cumulative_loss.info("iou " + str(box_loss_iou))
+        #cumulative_loss.info("\n")
         cumulative_loss.info("iiou " + str(box_loss_iiou))
-        cumulative_loss.info("iou " + str(box_loss_iou))
         cumulative_loss.info("\n")
 
         rpn_loss = cls_loss + box_loss_iiou
