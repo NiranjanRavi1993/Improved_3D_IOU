@@ -11,11 +11,13 @@ import pdb
 
 rdiou_log_file = ('/N/slate/ravin/Fall2024/Improved_3D_IOU/logfile/rdiou.txt')
 iiou_log_file = ('/N/slate/ravin/Fall2024/Improved_3D_IOU/logfile/iiou.txt')
+iou_log_file = ('/N/slate/ravin/Fall2024/Improved_3D_IOU/logfile/iou.txt')
+cumulative_loss_log_file = ('/N/slate/ravin/Fall2024/Improved_3D_IOU/logfile/cumulative.txt')
 
 def create_logger_loss(log_file=None, rank=0, log_level=logging.INFO):
     logger = logging.getLogger(__name__)
     logger.setLevel(log_level if rank == 0 else 'ERROR')
-    formatter = logging.Formatter('%(asctime)s  %(levelname)5s  %(message)s')
+    formatter = logging.Formatter('%(levelname)5s  %(message)s')
     console = logging.StreamHandler()
     console.setLevel(log_level if rank == 0 else 'ERROR')
     console.setFormatter(formatter)
@@ -30,6 +32,8 @@ def create_logger_loss(log_file=None, rank=0, log_level=logging.INFO):
     
 logger_rdiou = create_logger_loss(rdiou_log_file)
 logger_iiou = create_logger_loss(iiou_log_file)
+logger_iou = create_logger_loss(iou_log_file)
+cumulative_loss = create_logger_loss(cumulative_loss_log_file)
 
 class AnchorHeadRDIoU(AnchorHeadTemplate):
     def __init__(self, model_cfg, input_channels, num_class, class_names, grid_size, point_cloud_range,
@@ -94,58 +98,6 @@ class AnchorHeadRDIoU(AnchorHeadTemplate):
             'dir_loss_func',
             loss_utils.WeightedCrossEntropyLoss()
         )
-    
-    def get_rdiou_old(self, bboxes1, bboxes2):
-        x1u, y1u, z1u = bboxes1[:,:,0], bboxes1[:,:,1], bboxes1[:,:,2]
-        l1, w1, h1 =  torch.exp(bboxes1[:,:,3]), torch.exp(bboxes1[:,:,4]), torch.exp(bboxes1[:,:,5])
-        t1 = torch.sin(bboxes1[:,:,6]) * torch.cos(bboxes2[:,:,6])
-        x2u, y2u, z2u = bboxes2[:,:,0], bboxes2[:,:,1], bboxes2[:,:,2]
-        l2, w2, h2 =  torch.exp(bboxes2[:,:,3]), torch.exp(bboxes2[:,:,4]), torch.exp(bboxes2[:,:,5])
-        t2 = torch.cos(bboxes1[:,:,6]) * torch.sin(bboxes2[:,:,6])
-
-        # we emperically scale the y/z to make their predictions more sensitive.
-        x1 = x1u
-        y1 = y1u * 2
-        z1 = z1u * 2
-        x2 = x2u
-        y2 = y2u * 2
-        z2 = z2u * 2
-
-        # clamp is necessray to aviod inf.
-        l1, w1, h1 = torch.clamp(l1, max=10), torch.clamp(w1, max=10), torch.clamp(h1, max=10)
-        j1, j2 = torch.ones_like(h2), torch.ones_like(h2)
-
-        volume_1 = l1 * w1 * h1 * j1
-        volume_2 = l2 * w2 * h2 * j2
-
-        inter_l = torch.max(x1 - l1 / 2, x2 - l2 / 2)
-        inter_r = torch.min(x1 + l1 / 2, x2 + l2 / 2)
-        inter_t = torch.max(y1 - w1 / 2, y2 - w2 / 2)
-        inter_b = torch.min(y1 + w1 / 2, y2 + w2 / 2)
-        inter_u = torch.max(z1 - h1 / 2, z2 - h2 / 2)
-        inter_d = torch.min(z1 + h1 / 2, z2 + h2 / 2)
-        inter_m = torch.max(t1 - j1 / 2, t2 - j2 / 2)
-        inter_n = torch.min(t1 + j1 / 2, t2 + j2 / 2)
-
-        inter_volume = torch.clamp((inter_r - inter_l),min=0) * torch.clamp((inter_b - inter_t),min=0) \
-            * torch.clamp((inter_d - inter_u),min=0) * torch.clamp((inter_n - inter_m),min=0)
-        
-        c_l = torch.min(x1 - l1 / 2,x2 - l2 / 2)
-        c_r = torch.max(x1 + l1 / 2,x2 + l2 / 2)
-        c_t = torch.min(y1 - w1 / 2,y2 - w2 / 2)
-        c_b = torch.max(y1 + w1 / 2,y2 + w2 / 2)
-        c_u = torch.min(z1 - h1 / 2,z2 - h2 / 2)
-        c_d = torch.max(z1 + h1 / 2,z2 + h2 / 2)
-        c_m = torch.min(t1 - j1 / 2,t2 - j2 / 2)
-        c_n = torch.max(t1 + j1 / 2,t2 + j2 / 2)
-
-        inter_diag = (x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2 + (t2 - t1)**2
-        c_diag = torch.clamp((c_r - c_l),min=0)**2 + torch.clamp((c_b - c_t),min=0)**2 + torch.clamp((c_d - c_u),min=0)**2  + torch.clamp((c_n - c_m),min=0)**2
-
-        union = volume_1 + volume_2 - inter_volume
-        u = (inter_diag) / c_diag
-        rdiou = inter_volume / union
-        return u, rdiou
         
     def get_rdiou(self, bboxes1, bboxes2):  #NiranjanCode
 		
@@ -233,15 +185,7 @@ class AnchorHeadRDIoU(AnchorHeadTemplate):
         distance_between_max_edges = (x1_max - x2_max) ** 2+ (y1_max - y2_max) ** 2 + (z1_max - z2_max) ** 2 + eps
         
         eucledian_part = distance_between_x_cord + distance_between_y_cord + distance_between_min_edges + distance_between_max_edges
-        iiou = eucledian_part/inter_diag
-        
-        
-        
-        
-        #logger_iou.info("iiou")
-        #logger_iou.info(iiou)
-        #logger_iou.info("rdiou")
-        #logger_iou.info(rdiou)
+        iiou = eucledian_part/c_diag
           
         return u, rdiou, iiou #iiou
 
@@ -327,6 +271,63 @@ class AnchorHeadRDIoU(AnchorHeadTemplate):
         rdiou_loss_src = rdiou_loss_m * reg_weights
         rdiou_loss = rdiou_loss_src.sum() / batch_size
         
+        
+        rdiou_loss = rdiou_loss * self.model_cfg.LOSS_CONFIG.LOSS_WEIGHTS['loc_weight']
+        box_loss = rdiou_loss
+        tb_dict = {
+            'rpn_loss_loc': rdiou_loss.item()
+        }
+
+
+        if box_dir_cls_preds is not None:
+            dir_targets = self.get_direction_target(
+                anchors, box_reg_targets,
+                dir_offset=self.model_cfg.DIR_OFFSET,
+                num_bins=self.model_cfg.NUM_DIR_BINS
+            )
+
+            dir_logits = box_dir_cls_preds.view(batch_size, -1, self.model_cfg.NUM_DIR_BINS)
+            weights = positives.type_as(dir_logits)
+            weights /= torch.clamp(weights.sum(-1, keepdim=True), min=1.0)
+            dir_loss = self.dir_loss_func(dir_logits, dir_targets, weights=reg_weights)
+            dir_loss = dir_loss.sum() / batch_size
+            dir_loss = dir_loss * self.model_cfg.LOSS_CONFIG.LOSS_WEIGHTS['dir_weight']
+            box_loss += dir_loss
+            tb_dict['rpn_loss_dir'] = dir_loss.item()
+
+        return box_loss, tb_dict
+        
+        
+    def get_iiou_guided_reg_loss(self):
+        box_preds = self.forward_ret_dict['box_preds']
+        box_dir_cls_preds = self.forward_ret_dict.get('dir_cls_preds', None)
+        box_reg_targets = self.forward_ret_dict['box_reg_targets']
+        box_cls_labels = self.re_box_cls_labels
+        batch_size = int(box_preds.shape[0])
+ 
+        box_cls_labels = box_cls_labels.view(batch_size, -1)
+        positives = box_cls_labels > 0
+        reg_weights = positives.float()
+        pos_normalizer = positives.sum(1, keepdim=True).float()
+        reg_weights /= torch.clamp(pos_normalizer, min=1.0)
+
+        if isinstance(self.anchors, list):
+            if self.use_multihead:
+                anchors = torch.cat(
+                    [anchor.permute(3, 4, 0, 1, 2, 5).contiguous().view(-1, anchor.shape[-1]) for anchor in
+                     self.anchors], dim=0)
+            else:
+                anchors = torch.cat(self.anchors, dim=-3)
+        else:
+            anchors = self.anchors
+        anchors = anchors.view(1, -1, anchors.shape[-1]).repeat(batch_size, 1, 1)
+        box_preds = box_preds.view(batch_size, -1,
+                                   box_preds.shape[-1] // self.num_anchors_per_location if not self.use_multihead else
+                                   box_preds.shape[-1])
+
+        u, rdiou, iiou = self.get_rdiou(box_preds, box_reg_targets)
+
+       
         #Niran 
         iiou_loss_n = iiou - u
         iiou_loss_n = torch.clamp(iiou_loss_n,min=-1.0,max = 1.0)
@@ -334,14 +335,77 @@ class AnchorHeadRDIoU(AnchorHeadTemplate):
         iiou_loss_src = iiou_loss_m * reg_weights
         iiou_loss = iiou_loss_src.sum() / batch_size
         
-        logger_rdiou.info(rdiou_loss)
-        logger_iiou.info(iiou_loss)
+      
         
-        
-        rdiou_loss = rdiou_loss * self.model_cfg.LOSS_CONFIG.LOSS_WEIGHTS['loc_weight']
-        box_loss = rdiou_loss
+        iiou_loss = iiou_loss * self.model_cfg.LOSS_CONFIG.LOSS_WEIGHTS['loc_weight']
+        box_loss = iiou_loss
         tb_dict = {
-            'rpn_loss_loc': rdiou_loss.item()
+            'rpn_loss_loc': iiou_loss.item()
+        }
+
+
+        if box_dir_cls_preds is not None:
+            dir_targets = self.get_direction_target(
+                anchors, box_reg_targets,
+                dir_offset=self.model_cfg.DIR_OFFSET,
+                num_bins=self.model_cfg.NUM_DIR_BINS
+            )
+
+            dir_logits = box_dir_cls_preds.view(batch_size, -1, self.model_cfg.NUM_DIR_BINS)
+            weights = positives.type_as(dir_logits)
+            weights /= torch.clamp(weights.sum(-1, keepdim=True), min=1.0)
+            dir_loss = self.dir_loss_func(dir_logits, dir_targets, weights=reg_weights)
+            dir_loss = dir_loss.sum() / batch_size
+            dir_loss = dir_loss * self.model_cfg.LOSS_CONFIG.LOSS_WEIGHTS['dir_weight']
+            box_loss += dir_loss
+            tb_dict['rpn_loss_dir'] = dir_loss.item()
+
+        return box_loss, tb_dict
+        
+        
+    def get_iou_guided_reg_loss(self):
+        box_preds = self.forward_ret_dict['box_preds']
+        box_dir_cls_preds = self.forward_ret_dict.get('dir_cls_preds', None)
+        box_reg_targets = self.forward_ret_dict['box_reg_targets']
+        box_cls_labels = self.re_box_cls_labels
+        batch_size = int(box_preds.shape[0])
+ 
+        box_cls_labels = box_cls_labels.view(batch_size, -1)
+        positives = box_cls_labels > 0
+        reg_weights = positives.float()
+        pos_normalizer = positives.sum(1, keepdim=True).float()
+        reg_weights /= torch.clamp(pos_normalizer, min=1.0)
+
+        if isinstance(self.anchors, list):
+            if self.use_multihead:
+                anchors = torch.cat(
+                    [anchor.permute(3, 4, 0, 1, 2, 5).contiguous().view(-1, anchor.shape[-1]) for anchor in
+                     self.anchors], dim=0)
+            else:
+                anchors = torch.cat(self.anchors, dim=-3)
+        else:
+            anchors = self.anchors
+        anchors = anchors.view(1, -1, anchors.shape[-1]).repeat(batch_size, 1, 1)
+        box_preds = box_preds.view(batch_size, -1,
+                                   box_preds.shape[-1] // self.num_anchors_per_location if not self.use_multihead else
+                                   box_preds.shape[-1])
+
+        u, rdiou, iiou = self.get_rdiou(box_preds, box_reg_targets)
+
+        
+        
+        #Niran 
+        simple_iou_loss_n = rdiou
+        simple_iou_loss_n = torch.clamp(simple_iou_loss_n,min=-1.0,max = 1.0)
+        simple_iou_loss_m = 1 - simple_iou_loss_n
+        simple_iou_loss_src = simple_iou_loss_n * reg_weights
+        simple_iou_loss = simple_iou_loss_src.sum() / batch_size
+      
+        
+        simple_iou_loss = simple_iou_loss * self.model_cfg.LOSS_CONFIG.LOSS_WEIGHTS['loc_weight']
+        box_loss = simple_iou_loss
+        tb_dict = {
+            'rpn_loss_loc': simple_iou_loss.item()
         }
 
 
@@ -397,10 +461,18 @@ class AnchorHeadRDIoU(AnchorHeadTemplate):
     def get_loss(self):
         self.re_box_cls_labels, self.rdiou_guided_cls_labels = self.get_clsreg_targets()
         box_loss, tb_dict = self.get_rdiou_guided_reg_loss()
+        box_loss_iiou, tb_dict = self.get_iiou_guided_reg_loss()
+        box_loss_iou, tb_dict = self.get_iou_guided_reg_loss()
         cls_loss, tb_dict_cls = self.get_rdiou_guided_cls_loss()
         tb_dict.update(tb_dict_cls)
+        
+        cumulative_loss.info("rdiou " + str(box_loss))
+        cumulative_loss.info("iiou " + str(box_loss_iiou))
+        cumulative_loss.info("iou " + str(box_loss_iou))
+        cumulative_loss.info("\n")
 
-        rpn_loss = cls_loss + box_loss
+        rpn_loss = cls_loss + box_loss_iiou
+        
 
         if rpn_loss.isnan():
             print(cls_loss)
