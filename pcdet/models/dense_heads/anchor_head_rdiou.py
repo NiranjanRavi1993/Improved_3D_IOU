@@ -10,14 +10,16 @@ import logging
 import pdb
 
 #rdiou_log_file = ('/N/slate/ravin/Fall2024/Improved_3D_IOU/logfile/rdiou.txt')
-#iiou_log_file = ('/N/slate/ravin/Fall2024/Improved_3D_IOU/logfile/iiou.txt')
-#iou_log_file = ('/N/slate/ravin/Fall2024/Improved_3D_IOU/logfile/iou.txt')
-cumulative_loss_log_file = ('/N/slate/ravin/Fall2024/Improved_3D_IOU/logfile/cumulative.txt')
+#iou_log_file   = ('/N/slate/ravin/Fall2024/Improved_3D_IOU/logfile/iou.txt')
+#cumulative_loss_log_file = ('/N/slate/ravin/Fall2024/Improved_3D_IOU/logfile/cumulative.txt')
+#iiou_rpn_log_file  = ('/N/slate/ravin/Fall2024/Improved_3D_IOU/iiou_logfile/rpn_iiou.txt')
+
+rdiou_log_file  = ('/N/slate/ravin/Fall2024/Improved_3D_IOU/rdiou_logfile/rdiou.txt')
 
 def create_logger_loss(log_file=None, rank=0, log_level=logging.INFO):
     logger = logging.getLogger(__name__)
     logger.setLevel(log_level if rank == 0 else 'ERROR')
-    formatter = logging.Formatter('%(levelname)5s  %(message)s')
+    formatter = logging.Formatter('%(asctime)s  %(message)s')
     console = logging.StreamHandler()
     console.setLevel(log_level if rank == 0 else 'ERROR')
     console.setFormatter(formatter)
@@ -31,9 +33,12 @@ def create_logger_loss(log_file=None, rank=0, log_level=logging.INFO):
     return logger
     
 #logger_rdiou = create_logger_loss(rdiou_log_file)
-#logger_iiou = create_logger_loss(iiou_log_file)
 #logger_iou = create_logger_loss(iou_log_file)
-cumulative_loss = create_logger_loss(cumulative_loss_log_file)
+#cumulative_loss = create_logger_loss(cumulative_loss_log_file)
+
+
+logger_rdiou     = create_logger_loss(rdiou_log_file)
+#logger_rpn_iiou = create_logger_loss(iiou_rpn_log_file)
 
 class AnchorHeadRDIoU(AnchorHeadTemplate):
     def __init__(self, model_cfg, input_channels, num_class, class_names, grid_size, point_cloud_range,
@@ -411,14 +416,14 @@ class AnchorHeadRDIoU(AnchorHeadTemplate):
                                    box_preds.shape[-1] // self.num_anchors_per_location if not self.use_multihead else
                                    box_preds.shape[-1])
 
-        u, rdiou, iiou = self.get_rdiou(box_preds, box_reg_targets)
+        d_square_part, simple_intersection_over_union, total_eculedian_distance = self.get_rdiou(box_preds, box_reg_targets)
 
         
         
         #Niran 
-        simple_iou_loss_n = rdiou
-        simple_iou_loss_n = torch.clamp(simple_iou_loss_n,min=-1.0,max = 1.0)
+        simple_iou_loss_n = simple_intersection_over_union
         simple_iou_loss_m = 1 - simple_iou_loss_n
+        simple_iou_loss_n = torch.clamp(simple_iou_loss_m,min=-1.0,max = 1.0)
         simple_iou_loss_src = simple_iou_loss_n * reg_weights
         simple_iou_loss = simple_iou_loss_src.sum() / batch_size
       
@@ -481,20 +486,30 @@ class AnchorHeadRDIoU(AnchorHeadTemplate):
 
     def get_loss(self):
         self.re_box_cls_labels, self.rdiou_guided_cls_labels = self.get_clsreg_targets()
-        box_loss, tb_dict = self.get_rdiou_guided_reg_loss()
-        box_loss_iiou, tb_dict = self.get_iiou_guided_reg_loss()
-        box_loss_iou, tb_dict = self.get_iou_guided_reg_loss()
+        rdiou_box_loss, tb_dict = self.get_rdiou_guided_reg_loss()
+        #iiou_box_loss, tb_dict = self.get_iiou_guided_reg_loss()
+        #iou_box_loss, tb_dict = self.get_iou_guided_reg_loss()
         cls_loss, tb_dict_cls = self.get_rdiou_guided_cls_loss()
         tb_dict.update(tb_dict_cls)
         
-        #cumulative_loss.info("rdiou " + str(box_loss))
-        #cumulative_loss.info("iiou " + str(box_loss_iiou))
-        #cumulative_loss.info("iou " + str(box_loss_iou))
-        #cumulative_loss.info("\n")
-        cumulative_loss.info("iiou " + str(box_loss_iiou))
-        cumulative_loss.info("\n")
-
-        rpn_loss = cls_loss + box_loss_iiou
+        
+        logger_rdiou.info("rdiou_box_loss " + str(rdiou_box_loss))
+        #logger_iiou.info("iiou_box_loss " + str(iiou_box_loss))
+        #logger_iou.info("iou_box_loss " + str(iou_box_loss))
+        
+        """
+        rdiou = rdiou_box_loss.detach().to('cpu').numpy()
+        iiou  = iiou_box_loss.detach().to('cpu').numpy()
+        iou   = iou_box_loss.detach().to('cpu').numpy()
+        
+        
+        logger_rdiou.info(str(rdiou))
+        logger_iiou.info(str(iiou))
+        logger_iou.info(str(iou))
+        """
+        
+        rpn_loss = cls_loss + rdiou_box_loss
+        #logger_rpn_iiou.info("rpn_loss " + str(rpn_loss))
         
 
         if rpn_loss.isnan():
