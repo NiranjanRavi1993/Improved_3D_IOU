@@ -21,4 +21,14 @@ cd /N/slate/ravin/Fall2024/testenv3
 
 python3 setup.py develop
 
-
+"""
+conda create --name py42 python=3.9 
+conda install pytorch==1.7.1 torchvision==0.8.2 torchaudio==0.7.2 cudatoolkit=11.0 -c pytorch
+pip install SharedArray==3.2.2
+pip install timm
+pip install scipy==1.11.1
+pip install scikit-image
+pip install spconv-cu111
+pip install tqdm 
+pip install numba==0.57.1
+"""
